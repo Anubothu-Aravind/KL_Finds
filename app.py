@@ -3,7 +3,8 @@ from flask import Flask, request, jsonify
 import threading
 import os
 import logging
-from bot import start_bot
+import telebot
+import importlib
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -26,7 +27,9 @@ def health():
 def start_bot_route():
     global bot_thread
     if bot_thread is None or not bot_thread.is_alive():
-        bot_thread = threading.Thread(target=start_bot)
+        # Import bot module here to avoid circular imports
+        import bot
+        bot_thread = threading.Thread(target=bot.start_bot)
         bot_thread.daemon = True
         bot_thread.start()
         return jsonify({"status": "Bot started successfully"})
@@ -35,7 +38,9 @@ def start_bot_route():
 def start_server():
     # Start the bot in a separate thread when the app starts
     global bot_thread
-    bot_thread = threading.Thread(target=start_bot)
+    # Import bot module here to avoid circular imports
+    import bot
+    bot_thread = threading.Thread(target=bot.start_bot)
     bot_thread.daemon = True
     bot_thread.start()
     logger.info("Bot started in background thread")
@@ -49,3 +54,6 @@ if __name__ == "__main__":
     
     # Run Flask app
     app.run(host="0.0.0.0", port=port)
+else:
+    # For gunicorn startup
+    start_server()
