@@ -1,4 +1,3 @@
-# bot.py
 import telebot
 from supabase import create_client
 import re
@@ -27,26 +26,39 @@ admin_logged_in = {}
 def check_and_create_tables():
     try:
         supabase.table("users").select("id").limit(1).execute()
-        logger.info("✅ Users table check passed.")
+        print("✅ Users table check passed.")
     except:
-        logger.warning("❌ Users table check failed.")
+        print("❌ Users table check failed.")
     try:
         supabase.table("faculty").select("id").limit(1).execute()
-        logger.info("✅ Faculty table check passed.")
+        print("✅ Faculty table check passed.")
     except:
-        logger.warning("❌ Faculty table check failed.")
+        print("❌ Faculty table check failed.")
     try:
         supabase.table("contributions").select("id").limit(1).execute()
-        logger.info("✅ Contributions table check passed.")
+        print("✅ Contributions table check passed.")
     except:
-        logger.warning("❌ Contributions table check failed.")
+        print("❌ Contributions table check failed.")
 
 def is_user_registered(telegram_id):
     res = supabase.table("users").select("*").eq("telegram_id", str(telegram_id)).execute()
     return len(res.data) > 0
 
 def register_user(telegram_id):
-    supabase.table("users").insert({"telegram_id": str(telegram_id), "email": "no_email@klu.in"}).execute()
+    try:
+        res = supabase.table("users").insert({
+            "telegram_id": str(telegram_id),
+            "email": f"{telegram_id}@klu.in"
+        }).execute()
+        if res.data:
+            print(f"✅ New user {telegram_id} registered.")
+            return True
+        else:
+            print(f"❌ Failed to register user {telegram_id}: No data returned.")
+            return False
+    except Exception as e:
+        print(f"❌ Exception during user registration for {telegram_id}: {e}")
+        return False
 
 def parse_cabin_info(cabin_input):
     match = re.match(r"([lrmLRM])(\d{3})", cabin_input.strip())
@@ -71,9 +83,15 @@ def insert_faculty_data(faculty_name, block, floor, room, cabin, telegram_id):
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    if not is_user_registered(message.from_user.id):
-        register_user(message.from_user.id)
-        bot.send_message(message.chat.id, "Welcome! You've been registered.")
+    telegram_id = message.from_user.id
+    if not is_user_registered(telegram_id):
+        success = register_user(telegram_id)
+        if success:
+            bot.send_message(message.chat.id, "👋 Welcome! You've been registered.")
+        else:
+            bot.send_message(message.chat.id, "⚠️ Registration failed. Try again later.")
+    else:
+        bot.send_message(message.chat.id, "👋 Welcome back!")
     show_menu(message)
 
 def show_menu(message):
@@ -244,10 +262,10 @@ def confirm_delete_index(message):
         bot.send_message(message.chat.id, "❌ Invalid input or error deleting.")
 
 def start_bot():
-    logger.info("🤖 Bot is now running...")
+    print("🤖 Bot is now running...")
     check_and_create_tables()
     bot.infinity_polling()
 
-# Allow direct running of this script
+# This allows the script to run standalone
 if __name__ == "__main__":
     start_bot()
