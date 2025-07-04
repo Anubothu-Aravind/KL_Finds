@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Bot configuration from environment variables or fallback to hardcoded values
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "7514287995:AAHRO3a3FjI-6Tt6OQL1NlNh_1UkKAmzlOY")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://dwkmgssfaggkfkqannxv.supabase.co")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR3a21nc3NmYWdna2ZrcWFubnh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM0MzQ2MDMsImV4cCI6MjA1OTAxMDYwM30.6I1QXPuGhLhaI6yjVxnZG2ypyBto0hOyy8pI7aZUTsw")
 
