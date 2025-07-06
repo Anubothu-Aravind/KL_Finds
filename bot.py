@@ -9,14 +9,14 @@ import os
 import logging
 
 load_dotenv()
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Bot configuration from environment variables or fallback to hardcoded values
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://dwkmgssfaggkfkqannxv.supabase.co")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR3a21nc3NmYWdna2ZrcWFubnh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM0MzQ2MDMsImV4cCI6MjA1OTAxMDYwM30.6I1QXPuGhLhaI6yjVxnZG2ypyBto0hOyy8pI7aZUTsw")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYFzZSIsInJlZiI6ImR3a21nc3NmYWdna2ZrcWFubnh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM0MzQ2MDMsImV4cCI6MjA1OTAxMDYwM30.6I1QXPuGhLhaI6yjVxnZG2ypyBto0hOyy8pI7aZUTsw")
+
+
 
 bot = telebot.TeleBot(BOT_TOKEN)
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -52,14 +52,9 @@ def register_user(telegram_id):
             "telegram_id": str(telegram_id),
             "email": f"{telegram_id}@klu.in"
         }).execute()
-        if res.data:
-            print(f"✅ New user {telegram_id} registered.")
-            return True
-        else:
-            print(f"❌ Failed to register user {telegram_id}: No data returned.")
-            return False
+        return bool(res.data)
     except Exception as e:
-        print(f"❌ Exception during user registration for {telegram_id}: {e}")
+        print(f"❌ Registration error: {e}")
         return False
 
 def parse_cabin_info(cabin_input):
@@ -87,11 +82,10 @@ def insert_faculty_data(faculty_name, block, floor, room, cabin, telegram_id):
 def start(message):
     telegram_id = message.from_user.id
     if not is_user_registered(telegram_id):
-        success = register_user(telegram_id)
-        if success:
+        if register_user(telegram_id):
             bot.send_message(message.chat.id, "👋 Welcome! You've been registered.")
         else:
-            bot.send_message(message.chat.id, "⚠️ Registration failed. Try again later.")
+            bot.send_message(message.chat.id, "⚠️ Registration failed.")
     else:
         bot.send_message(message.chat.id, "👋 Welcome back!")
     show_menu(message)
@@ -103,29 +97,50 @@ def show_menu(message):
 
 @bot.message_handler(func=lambda m: m.text == "1.Contribute")
 def contribute(message):
-    bot.send_message(message.chat.id, f"Your Telegram ID: {message.from_user.id}\nWe are storing your contributions.")
-    bot.send_message(message.chat.id, "Enter full faculty name with title (Dr./Mr./Ms./Mrs.): or type 'exit' to cancel")
+    bot.send_message(message.chat.id, f"Your Telegram ID: {message.from_user.id}\nWe are storing your contributions.",
+                     reply_markup=telebot.types.ReplyKeyboardRemove())
+    bot.send_message(message.chat.id, "Enter full faculty name with title (Dr./Mr./Ms./Mrs.):\n\n👉 Type 'exit' to cancel anytime.")
     bot.register_next_step_handler(message, contrib_name)
 
 def contrib_name(message):
     if message.text.lower() == "exit": return cancel_flow(message)
-    user_data[message.chat.id] = {"faculty_name": message.text}
-    bot.send_message(message.chat.id, "Enter block name:")
+    name = message.text.strip()
+    if not re.match(r"^(dr|mr|ms|mrs)\.\s*[a-zA-Z]", name, re.IGNORECASE):
+        bot.send_message(message.chat.id, "⚠️ Invalid format. Include title (e.g., Dr.Ramesh).")
+        return bot.register_next_step_handler(message, contrib_name)
+    user_data[message.chat.id] = {"faculty_name": name}
+    bot.send_message(message.chat.id, "Enter block name:\n\n👉 Type 'exit' to cancel anytime.")
     bot.register_next_step_handler(message, contrib_block)
 
 def contrib_block(message):
     if message.text.lower() == "exit": return cancel_flow(message)
-    user_data[message.chat.id]["block"] = message.text
-    bot.send_message(message.chat.id, "Enter cabin number (e.g., L404, M201):")
+    user_data[message.chat.id]["block"] = message.text.strip()
+    bot.send_message(message.chat.id, "Enter cabin number (e.g., L404):\n\n👉 Type 'exit' to cancel anytime.")
     bot.register_next_step_handler(message, contrib_cabin)
 
 def contrib_cabin(message):
     if message.text.lower() == "exit": return cancel_flow(message)
+    cabin_input = message.text.strip()
+    block_code, floor, room = parse_cabin_info(cabin_input)
     data = user_data[message.chat.id]
-    block_code, floor, room = parse_cabin_info(message.text)
-    insert_faculty_data(data["faculty_name"], data["block"], floor, room, message.text, message.from_user.id)
-    bot.send_message(message.chat.id, "✅ Faculty added successfully.", reply_markup=telebot.types.ReplyKeyboardRemove())
+    data.update({"cabin": cabin_input, "floor": floor, "room": room, "block_code": block_code})
+    reply = f"📝 Confirm details:\n\n👤 Name: {data['faculty_name']}\n🏢 Block: {data['block']}\n🏠 Cabin: {cabin_input}"
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("✅ Confirm", "❌ Cancel")
+    bot.send_message(message.chat.id, reply, reply_markup=markup)
+    bot.register_next_step_handler(message, finalize_contribution)
+
+def finalize_contribution(message):
+    choice = message.text.strip().lower()
+    data = user_data.get(message.chat.id)
+    if "confirm" in choice:
+        insert_faculty_data(data["faculty_name"], data["block"], data["floor"],
+                            data["room"], data["cabin"], message.from_user.id)
+        bot.send_message(message.chat.id, "✅ Faculty added.", reply_markup=telebot.types.ReplyKeyboardRemove())
+    else:
+        bot.send_message(message.chat.id, "❌ Cancelled.", reply_markup=telebot.types.ReplyKeyboardRemove())
     user_data.pop(message.chat.id, None)
+    show_menu(message)
 
 def cancel_flow(message):
     bot.send_message(message.chat.id, "❌ Contribution cancelled.", reply_markup=telebot.types.ReplyKeyboardRemove())
@@ -140,8 +155,7 @@ def process_find_faculty(message):
     term = message.text.strip()
     results = supabase.table("faculty").select("*").ilike("faculty_name", f"%{term}%").execute()
     if not results.data:
-        bot.send_message(message.chat.id, "❌ No faculty members found matching your search.")
-        return
+        return bot.send_message(message.chat.id, "❌ No matches found.")
     reply = "\n".join([f"👤 {f['faculty_name']}\n🏢 Block: {f['block']}\n🏠 Cabin: {f['cabin']}\n" for f in results.data])
     bot.send_message(message.chat.id, reply)
 
@@ -162,30 +176,28 @@ def get_admin_pass(message):
     if message.text.strip() == admin_credentials["password"]:
         admin_logged_in[message.chat.id] = True
         markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.add("View Faculty List", "Download CSV", "/edit_faculty", "/delete_faculty")
-        bot.send_message(message.chat.id, "✅ Admin logged in. Choose an option:", reply_markup=markup)
+        markup.add("View Faculty List", "Download CSV")
+        markup.add("/edit_faculty", "/delete_faculty")
+        markup.add("Detect Fake")
+        bot.send_message(message.chat.id, "✅ Admin logged in.", reply_markup=markup)
     else:
         bot.send_message(message.chat.id, "❌ Wrong password.")
 
 @bot.message_handler(func=lambda m: m.text == "View Faculty List")
 def admin_view_faculty(message):
-    if not admin_logged_in.get(message.chat.id):
-        return bot.send_message(message.chat.id, "❌ Admin only.")
+    if not admin_logged_in.get(message.chat.id): return
     results = supabase.table("faculty").select("*").execute()
     if not results.data:
-        return bot.send_message(message.chat.id, "❌ No faculty data available.")
-    reply = "📋 Faculty List:\n\n"
-    for i, f in enumerate(results.data):
-        reply += f"{i+1}. {f['faculty_name']} | Block: {f['block']} | Cabin: {f['cabin']}\n"
+        return bot.send_message(message.chat.id, "❌ No data.")
+    reply = "\n".join([f"{i+1}. {f['faculty_name']} | Block: {f['block']} | Cabin: {f['cabin']}" for i, f in enumerate(results.data)])
     bot.send_message(message.chat.id, reply)
 
 @bot.message_handler(func=lambda m: m.text == "Download CSV")
 def admin_download_csv(message):
-    if not admin_logged_in.get(message.chat.id):
-        return bot.send_message(message.chat.id, "❌ Admin only")
+    if not admin_logged_in.get(message.chat.id): return
     results = supabase.table("faculty").select("*").execute()
     if not results.data:
-        return bot.send_message(message.chat.id, "❌ No data")
+        return bot.send_message(message.chat.id, "❌ No data.")
     df = pd.DataFrame(results.data)
     output = io.BytesIO()
     df.to_csv(output, index=False)
@@ -194,16 +206,13 @@ def admin_download_csv(message):
 
 @bot.message_handler(commands=['edit_faculty'])
 def edit_faculty(message):
-    if not admin_logged_in.get(message.chat.id):
-        return bot.send_message(message.chat.id, "❌ Admin only.")
+    if not admin_logged_in.get(message.chat.id): return
     results = supabase.table("faculty").select("*").execute()
     if not results.data:
-        return bot.send_message(message.chat.id, "❌ No faculty found.")
+        return bot.send_message(message.chat.id, "❌ No faculty.")
     user_data[message.chat.id] = {'edit_list': results.data}
-    reply = "Select a faculty to edit by S.No:\n"
-    for i, f in enumerate(results.data):
-        reply += f"{i+1}. {f['faculty_name']} | Block: {f['block']} | Cabin: {f['cabin']}\n"
-    bot.send_message(message.chat.id, reply)
+    reply = "\n".join([f"{i+1}. {f['faculty_name']} | Block: {f['block']} | Cabin: {f['cabin']}" for i, f in enumerate(results.data)])
+    bot.send_message(message.chat.id, "Select S.No to edit:\n" + reply)
     bot.register_next_step_handler(message, get_faculty_to_edit)
 
 def get_faculty_to_edit(message):
@@ -220,54 +229,97 @@ def get_faculty_to_edit(message):
 def edit_field_choice(message):
     choice = message.text.strip().lower()
     if "name" in choice:
-        bot.send_message(message.chat.id, "Enter new faculty name:")
+        bot.send_message(message.chat.id, "Enter new name:")
         bot.register_next_step_handler(message, lambda m: apply_edit_field(m, 'faculty_name'))
     elif "cabin" in choice:
-        bot.send_message(message.chat.id, "Enter new cabin number:")
+        bot.send_message(message.chat.id, "Enter new cabin:")
         bot.register_next_step_handler(message, lambda m: apply_edit_field(m, 'cabin'))
     elif "block" in choice:
-        bot.send_message(message.chat.id, "Enter new block name:")
+        bot.send_message(message.chat.id, "Enter new block:")
         bot.register_next_step_handler(message, lambda m: apply_edit_field(m, 'block'))
-    else:
-        bot.send_message(message.chat.id, "❌ Invalid option.")
 
 def apply_edit_field(message, field):
     new_val = message.text.strip()
     fid = user_data[message.chat.id]['edit_id']
     supabase.table("faculty").update({field: new_val}).eq("id", fid).execute()
-    bot.send_message(message.chat.id, f"✅ Faculty {field.replace('_', ' ')} updated successfully. Use /edit_faculty, /delete_faculty, /download_excel")
+    bot.send_message(message.chat.id, f"✅ Updated {field}.")
 
 @bot.message_handler(commands=['delete_faculty'])
 def delete_faculty(message):
-    if not admin_logged_in.get(message.chat.id):
-        return bot.send_message(message.chat.id, "❌ Admin only.")
+    if not admin_logged_in.get(message.chat.id): return
     results = supabase.table("faculty").select("*").execute()
-    if not results.data:
-        return bot.send_message(message.chat.id, "❌ No faculty to delete.")
+    if not results.data: return
     user_data[message.chat.id] = {'delete_list': results.data}
-    reply = "🗑️ Faculty List:\n\n"
-    for i, f in enumerate(results.data):
-        reply += f"{i+1}. {f['faculty_name']} | Block: {f['block']} | Cabin: {f['cabin']}\n"
-    bot.send_message(message.chat.id, reply + "\nEnter the S.No of the faculty to delete:")
+    reply = "\n".join([f"{i+1}. {f['faculty_name']} | Block: {f['block']} | Cabin: {f['cabin']}" for i, f in enumerate(results.data)])
+    bot.send_message(message.chat.id, reply + "\nEnter S.No to delete:")
     bot.register_next_step_handler(message, confirm_delete_index)
 
 def confirm_delete_index(message):
     try:
         index = int(message.text.strip()) - 1
         faculty = user_data[message.chat.id]['delete_list'][index]
-        faculty_id = faculty['id']
-        supabase.table("contributions").delete().eq("faculty_id", faculty_id).execute()
-        supabase.table("faculty").delete().eq("id", faculty_id).execute()
-        bot.send_message(message.chat.id, f"🗑️ Faculty '{faculty['faculty_name']}' deleted successfully. Use /edit_faculty, /delete_faculty, /download_excel")
-        del user_data[message.chat.id]['delete_list']
+        supabase.table("contributions").delete().eq("faculty_id", faculty['id']).execute()
+        supabase.table("faculty").delete().eq("id", faculty['id']).execute()
+        bot.send_message(message.chat.id, f"🗑️ Deleted {faculty['faculty_name']}.")
     except:
-        bot.send_message(message.chat.id, "❌ Invalid input or error deleting.")
+        bot.send_message(message.chat.id, "❌ Error.")
+    user_data.pop(message.chat.id, None)
+
+@bot.message_handler(func=lambda m: m.text == "Detect Fake")
+def detect_fake_entries(message):
+    if not admin_logged_in.get(message.chat.id):
+        return bot.send_message(message.chat.id, "❌ Admin only.")
+
+    results = supabase.table("faculty").select("*").execute()
+    if not results.data:
+        return bot.send_message(message.chat.id, "❌ No faculty records found.")
+
+    fake_list = []
+    for i, entry in enumerate(results.data):
+        name = entry['faculty_name'].lower()
+        cabin = entry['cabin'].lower()
+        if not re.match(r"^(dr|mr|ms|mrs)\.", name):
+            fake_list.append((i + 1, entry))
+        elif name in ["find", "name", "search"]:
+            fake_list.append((i + 1, entry))
+        elif not re.match(r"^[lrmLRM]\d{3}$", cabin):
+            fake_list.append((i + 1, entry))
+
+    if not fake_list:
+        return bot.send_message(message.chat.id, "✅ No fake entries detected.")
+
+    user_data[message.chat.id] = {"fake_list": fake_list}
+    reply = "🚨 *Detected fake entries:*\n\n"
+    for sno, f in fake_list:
+        reply += f"{sno}. 👤 {f['faculty_name']} | 🏢 Block: {f['block']} | 🏠 Cabin: {f['cabin']}\n"
+    reply += "\n💬 *Send S.No(s) to delete (comma-separated), or type 'exit' to cancel:*"
+    bot.send_message(message.chat.id, reply, parse_mode="Markdown")
+    bot.register_next_step_handler(message, delete_fake_snos)
+
+def delete_fake_snos(message):
+    if message.text.strip().lower() == "exit":
+        bot.send_message(message.chat.id, "❌ Operation cancelled.")
+        user_data.pop(message.chat.id, None)
+        return
+
+    try:
+        snos = [int(x.strip()) for x in message.text.split(",")]
+        to_delete = user_data[message.chat.id]["fake_list"]
+        for sno in snos:
+            if 1 <= sno <= len(to_delete):
+                faculty = to_delete[sno - 1][1]
+                fid = faculty['id']
+                supabase.table("contributions").delete().eq("faculty_id", fid).execute()
+                supabase.table("faculty").delete().eq("id", fid).execute()
+        bot.send_message(message.chat.id, "🗑️ Selected fake entries deleted.")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Error: {str(e)}")
+    user_data.pop(message.chat.id, None)
 
 def start_bot():
     print("🤖 Bot is now running...")
     check_and_create_tables()
     bot.infinity_polling()
 
-# This allows the script to run standalone
 if __name__ == "__main__":
     start_bot()
